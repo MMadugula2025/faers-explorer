@@ -1,0 +1,5 @@
+venv/
+raw_data/
+faers_clean.db
+.DS_Store
+
