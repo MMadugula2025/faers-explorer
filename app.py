@@ -74,15 +74,21 @@ def get_total_reports(drug_clean: str) -> int:
 def get_reports_by_year(drug_clean: str) -> pd.DataFrame:
     """
     Report counts grouped by year, using DEMO's fda_dt (the date FDA
-    received the report). Only shows years actually present in your
-    database — with one quarter loaded, you'll see one year/bar.
+    received the report). Grouping happens in SQL rather than pandas,
+    since SQLite can do this much faster than pulling every row into
+    Python first.
     """
     conn = get_connection()
     query = """
-        SELECT demo.fda_dt, drug.primaryid
+        SELECT
+            substr(demo.fda_dt, 1, 4) as year,
+            COUNT(DISTINCT drug.primaryid) as reports
         FROM drug
         JOIN demo ON drug.primaryid = demo.primaryid
         WHERE drug.drugname_clean = ?
+          AND demo.fda_dt IS NOT NULL
+        GROUP BY year
+        ORDER BY year
     """
     df = pd.read_sql(query, conn, params=(drug_clean,))
     conn.close()
@@ -90,11 +96,8 @@ def get_reports_by_year(drug_clean: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["year", "reports"])
 
-    df["year"] = pd.to_datetime(df["fda_dt"], format="%Y%m%d", errors="coerce").dt.year
-    yearly = df.dropna(subset=["year"]).groupby("year", as_index=False)["primaryid"].nunique()
-    yearly.columns = ["year", "reports"]
-    yearly["year"] = yearly["year"].astype(int)
-    return yearly.sort_values("year")
+    df["year"] = df["year"].astype(int)
+    return df
 
 
 @st.cache_data(show_spinner=False)
