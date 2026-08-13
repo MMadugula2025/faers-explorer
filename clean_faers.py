@@ -104,6 +104,8 @@ def build_database():
     drug = load_all_quarters("DRUG")
     print("Loading REAC across all quarters...")
     reac = load_all_quarters("REAC")
+    print("Loading OUTC across all quarters...")
+    outc = load_all_quarters("OUTC")
 
     print("\nDeduplicating case versions GLOBALLY (across all quarters)...")
     demo_clean = dedupe_to_latest_case(demo)
@@ -112,6 +114,7 @@ def build_database():
 
     drug_clean = drug[drug["primaryid"].isin(keep_ids)].copy()
     reac_clean = reac[reac["primaryid"].isin(keep_ids)].copy()
+    outc_clean = outc[outc["primaryid"].isin(keep_ids)].copy()
 
     print("\nNormalizing drug names...")
     drug_clean["drugname_clean"] = drug_clean["drugname"].apply(normalize_drug_name)
@@ -121,15 +124,18 @@ def build_database():
     demo_clean.to_sql("demo", conn, if_exists="replace", index=False)
     drug_clean.to_sql("drug", conn, if_exists="replace", index=False)
     reac_clean.to_sql("reac", conn, if_exists="replace", index=False)
+    outc_clean.to_sql("outc", conn, if_exists="replace", index=False)
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_drug_primaryid ON drug(primaryid)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_drug_name ON drug(drugname_clean)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_reac_primaryid ON reac(primaryid)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_outc_primaryid ON outc(primaryid)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_demo_primaryid ON demo(primaryid)")
     conn.commit()
     conn.close()
 
     print(f"\nDone. All {len(QUARTERS)} quarters combined into {OUT_DB}.")
-    print("Each row has a 'source_quarter' column so you can trace it back if needed.")
+    print("Tables: demo, drug, reac, outc. Each row has a 'source_quarter' column.")
 
 
 if __name__ == "__main__":

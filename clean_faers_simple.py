@@ -6,8 +6,8 @@ Goal is to understand what's happening before scaling up to more
 quarters or more files.
 
 What this does, in plain terms:
-  1. Loads three tables: who the patient was (DEMO), what drug they took
-     (DRUG), and what reaction happened (REAC).
+  1. Loads four tables: who the patient was (DEMO), what drug they took
+     (DRUG), what reaction happened (REAC), and how serious it was (OUTC).
   2. Removes duplicate versions of the same report (a report can get
      revised/re-filed; we only want the latest version of each).
   3. Cleans up messy drug names (e.g. strips dosage numbers so
@@ -73,14 +73,16 @@ def main():
     demo = load_table("DEMO")
     drug = load_table("DRUG")
     reac = load_table("REAC")
+    outc = load_table("OUTC")
 
     print()
     demo_clean = dedupe_to_latest_case(demo)
 
-    # Only keep DRUG/REAC rows whose primaryid survived the dedup step
+    # Only keep DRUG/REAC/OUTC rows whose primaryid survived the dedup step
     keep_ids = set(demo_clean["primaryid"])
     drug_clean = drug[drug["primaryid"].isin(keep_ids)].copy()
     reac_clean = reac[reac["primaryid"].isin(keep_ids)].copy()
+    outc_clean = outc[outc["primaryid"].isin(keep_ids)].copy()
 
     print("\nCleaning drug names...")
     drug_clean["drugname_clean"] = drug_clean["drugname"].apply(normalize_drug_name)
@@ -97,10 +99,11 @@ def main():
     demo_clean.to_sql("demo", conn, if_exists="replace", index=False)
     drug_clean.to_sql("drug", conn, if_exists="replace", index=False)
     reac_clean.to_sql("reac", conn, if_exists="replace", index=False)
+    outc_clean.to_sql("outc", conn, if_exists="replace", index=False)
     conn.commit()
     conn.close()
 
-    print("\nDone! You now have faers_clean.db with 3 tables: demo, drug, reac.")
+    print("\nDone! You now have faers_clean.db with 4 tables: demo, drug, reac, outc.")
     print("Next: we'll query it to make sure it looks right.")
 
 

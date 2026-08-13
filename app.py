@@ -117,6 +117,45 @@ def get_top_reactions(drug_clean: str, limit: int = 15) -> pd.DataFrame:
     return df
 
 
+# FAERS outcome codes -> human-readable labels
+OUTCOME_LABELS = {
+    "DE": "Death",
+    "LT": "Life-Threatening",
+    "HO": "Hospitalization",
+    "DS": "Disability",
+    "CA": "Congenital Anomaly",
+    "RI": "Required Intervention",
+    "OT": "Other Serious Event",
+}
+
+
+@st.cache_data(show_spinner=False)
+def get_outcome_breakdown(drug_clean: str) -> pd.DataFrame:
+    """
+    How serious were the outcomes reported alongside this drug?
+    A single report can have more than one outcome code (e.g. both
+    Hospitalization AND Life-Threatening), so these counts describe how
+    often each outcome TYPE appears, not a partition of all reports.
+    """
+    conn = get_connection()
+    query = """
+        SELECT outc.outc_cod as code, COUNT(DISTINCT outc.primaryid) as n
+        FROM drug
+        JOIN outc ON drug.primaryid = outc.primaryid
+        WHERE drug.drugname_clean = ?
+        GROUP BY outc.outc_cod
+        ORDER BY n DESC
+    """
+    df = pd.read_sql(query, conn, params=(drug_clean,))
+    conn.close()
+
+    if df.empty:
+        return df
+
+    df["outcome"] = df["code"].map(OUTCOME_LABELS).fillna(df["code"])
+    return df
+
+
 @st.cache_data(show_spinner=False)
 def get_top_drugs_by_year(top_n: int = 5) -> pd.DataFrame:
     """
@@ -211,6 +250,7 @@ def render_top_drugs_by_year_chart(top_n: int = 5):
         )
 
 
+
 def main():
     st.title("FAERS Adverse Event Explorer")
     st.caption(
@@ -230,7 +270,7 @@ def main():
 
     if not drug_input:
         st.info(
-            "Enter a drug name above to explore its reported adverse events. "
+            "👆 Enter a drug name above to explore its reported adverse events. "
             "Not sure what to try? A few examples from the loaded data: "
             "**MOUNJARO**, **PREDNISONE**, **METHOTREXATE**, **ASPIRIN**, **ACTEMRA**."
         )
@@ -262,8 +302,11 @@ def main():
 
     yearly_df = get_reports_by_year(drug_clean)
     reactions_df = get_top_reactions(drug_clean)
+    outcome_df = get_outcome_breakdown(drug_clean)
 
-    tab1, tab2 = st.tabs(["Reports over time", "Top reported reactions"])
+    tab1, tab2, tab3 = st.tabs(
+        ["Reports over time", "Top reported reactions", "Outcome severity"]
+    )
 
     with tab1:
         if len(yearly_df) <= 1:
@@ -301,6 +344,34 @@ def main():
                 yaxis={"categoryorder": "total ascending"},
             )
             st.plotly_chart(fig2, use_container_width=True)
+
+    with tab3:
+        if outcome_df.empty:
+            st.write(
+                "No outcome data found for this drug — either no serious outcomes "
+                "were coded, or OUTC data isn't loaded (run the cleaning scripts "
+                "again after this update to include it)."
+            )
+        else:
+            fig3 = go.Figure(
+                go.Pie(
+                    labels=outcome_df["outcome"],
+                    values=outcome_df["n"],
+                    hole=0.45,
+                    textinfo="label+percent",
+                )
+            )
+            fig3.update_layout(
+                title=f"Reported outcome types — {drug_clean}",
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+            st.caption(
+                "A single report can list more than one outcome (e.g. both "
+                "Hospitalization and Life-Threatening), so these counts reflect "
+                "how often each outcome type was mentioned — they won't necessarily "
+                "add up to your total report count above. Most FAERS reports have "
+                "no serious outcome coded at all."
+            )
 
 
 if __name__ == "__main__":
