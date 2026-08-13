@@ -21,6 +21,14 @@ DB_PATH = Path("./faers_clean.db")
 
 st.set_page_config(page_title="FAERS Adverse Event Explorer", layout="wide")
 
+# Shared color palette so every chart in the app feels like one designed
+# whole rather than each using Plotly's default colors independently.
+ACCENT = "#0D9488"          # used for single-series bar charts
+QUALITATIVE_PALETTE = [
+    "#0D9488", "#2563EB", "#7C3AED", "#DB2777", "#EA580C",
+    "#65A30D", "#0891B2", "#9333EA", "#DC2626", "#CA8A04",
+]
+
 DOSAGE_PATTERN = re.compile(r"\b\d+(\.\d+)?\s*(MG|MCG|G|ML|IU|MEQ|%)\b", re.IGNORECASE)
 
 
@@ -310,8 +318,9 @@ def render_top_drugs_by_year_chart(top_n: int = 5):
     df["rank"] = df.groupby("year")["mentions"].rank(method="first", ascending=False).astype(int)
 
     fig = go.Figure()
-    for drug_name in df["drugname_clean"].unique():
+    for i, drug_name in enumerate(df["drugname_clean"].unique()):
         drug_df = df[df["drugname_clean"] == drug_name].sort_values("year")
+        color = QUALITATIVE_PALETTE[i % len(QUALITATIVE_PALETTE)]
         fig.add_trace(
             go.Scatter(
                 x=drug_df["year"],
@@ -324,8 +333,8 @@ def render_top_drugs_by_year_chart(top_n: int = 5):
                     f"<b>{drug_name}</b><br>"
                     "Year: %{x}<br>Rank: %{y}<br>Mentions: %{text}<extra></extra>"
                 ),
-                marker=dict(size=10),
-                line=dict(width=2),
+                marker=dict(size=10, color=color),
+                line=dict(width=2, color=color),
             )
         )
 
@@ -353,7 +362,7 @@ def render_footer():
     """Shown at the bottom of every page in the app."""
     st.divider()
     st.caption(
-        "⚠️ FAERS is a **self-reported** surveillance system — anyone (patients, "
+        "FAERS is a **self-reported** surveillance system — anyone (patients, "
         "doctors, drug manufacturers, lawyers) can submit a report, and the FDA "
         "does not verify that the drug actually caused what was reported. A "
         "reaction or outcome appearing here alongside a drug reflects what someone "
@@ -400,7 +409,7 @@ def get_data_coverage() -> dict:
 def render_data_coverage_sidebar():
     coverage = get_data_coverage()
     with st.sidebar:
-        st.subheader("📊 Data currently loaded")
+        st.subheader("Data currently loaded")
         st.metric("Total unique reports", f"{coverage['total_reports']:,}")
         st.metric("Unique drugs", f"{coverage['total_drugs']:,}")
         if coverage["quarters"]:
@@ -434,7 +443,7 @@ def main():
 
     if not drug_input:
         st.info(
-            "👆 Enter a drug name above to explore its reported adverse events. "
+            "Enter a drug name above to explore its reported adverse events. "
             "Not sure what to try? A few examples from the loaded data: "
             "**MOUNJARO**, **PREDNISONE**, **METHOTREXATE**, **ASPIRIN**, **ACTEMRA**."
         )
@@ -503,7 +512,7 @@ def main():
 
             fig = go.Figure()
             fig.add_trace(
-                go.Bar(x=merged["year"], y=merged["pct"], name=drug_clean)
+                go.Bar(x=merged["year"], y=merged["pct"], name=drug_clean, marker_color=ACCENT)
             )
             fig.update_layout(
                 title=f"Reports by year, as % of all FAERS reports — {drug_clean}",
@@ -520,7 +529,7 @@ def main():
         else:
             fig = go.Figure()
             fig.add_trace(
-                go.Bar(x=yearly_df["year"], y=yearly_df["reports"], name=drug_clean)
+                go.Bar(x=yearly_df["year"], y=yearly_df["reports"], name=drug_clean, marker_color=ACCENT)
             )
             fig.update_layout(
                 title=f"Reports by year — {drug_clean}",
@@ -544,6 +553,7 @@ def main():
                     x=reactions_df["report_count"],
                     y=reactions_df["reaction"],
                     orientation="h",
+                    marker_color=ACCENT,
                 )
             )
             fig2.update_layout(
@@ -591,6 +601,7 @@ def main():
                     values=outcome_df["n"],
                     hole=0.45,
                     textinfo="label+percent",
+                    marker=dict(colors=QUALITATIVE_PALETTE),
                 )
             )
             fig3.update_layout(
@@ -617,6 +628,7 @@ def main():
                     x=co_drugs_df["co_reports"],
                     y=co_drugs_df["other_drug"],
                     orientation="h",
+                    marker_color=ACCENT,
                 )
             )
             fig4.update_layout(
