@@ -117,6 +117,100 @@ def get_top_reactions(drug_clean: str, limit: int = 15) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(show_spinner=False)
+def get_top_drugs_by_year(top_n: int = 5) -> pd.DataFrame:
+    """
+    For each year present in the data, find the N drugs with the most
+    unique report mentions that year. Uses a SQL window function
+    (ROW_NUMBER) so the ranking is computed by the database, not pandas.
+    """
+    conn = get_connection()
+    query = """
+        SELECT year, drugname_clean, mentions
+        FROM (
+            SELECT
+                substr(demo.fda_dt, 1, 4) as year,
+                drug.drugname_clean as drugname_clean,
+                COUNT(DISTINCT drug.primaryid) as mentions,
+                ROW_NUMBER() OVER (
+                    PARTITION BY substr(demo.fda_dt, 1, 4)
+                    ORDER BY COUNT(DISTINCT drug.primaryid) DESC
+                ) as rn
+            FROM drug
+            JOIN demo ON drug.primaryid = demo.primaryid
+            WHERE demo.fda_dt IS NOT NULL AND drug.drugname_clean != ''
+            GROUP BY year, drugname_clean
+        )
+        WHERE rn <= ?
+        ORDER BY year, mentions DESC
+    """
+    df = pd.read_sql(query, conn, params=(top_n,))
+    conn.close()
+
+    if df.empty:
+        return df
+
+    df["year"] = df["year"].astype(int)
+    return df
+
+
+def render_top_drugs_by_year_chart(top_n: int = 5):
+    """
+    Bump chart (a ranking/slope chart): one line per drug, showing its
+    rank position (1 = most mentioned) across each year. Deliberately a
+    different chart type from the bar charts used elsewhere on the page,
+    since rank-over-time is what we're trying to communicate here, not
+    raw magnitude.
+    """
+    df = get_top_drugs_by_year(top_n=top_n)
+
+    if df.empty:
+        st.info("No data available yet — load at least one quarter to see this chart.")
+        return
+
+    # Rank within each year: 1 = most mentions that year
+    df = df.sort_values(["year", "mentions"], ascending=[True, False]).copy()
+    df["rank"] = df.groupby("year")["mentions"].rank(method="first", ascending=False).astype(int)
+
+    fig = go.Figure()
+    for drug_name in df["drugname_clean"].unique():
+        drug_df = df[df["drugname_clean"] == drug_name].sort_values("year")
+        fig.add_trace(
+            go.Scatter(
+                x=drug_df["year"],
+                y=drug_df["rank"],
+                mode="lines+markers+text",
+                name=drug_name,
+                text=[f"{m:,}" for m in drug_df["mentions"]],
+                textposition="middle right",
+                hovertemplate=(
+                    f"<b>{drug_name}</b><br>"
+                    "Year: %{x}<br>Rank: %{y}<br>Mentions: %{text}<extra></extra>"
+                ),
+                marker=dict(size=10),
+                line=dict(width=2),
+            )
+        )
+
+    n_years = df["year"].nunique()
+    fig.update_layout(
+        title=f"Top {top_n} Most Mentioned Drugs by Year",
+        xaxis_title="Year",
+        yaxis_title="Rank (1 = most mentioned)",
+        xaxis=dict(type="category"),
+        yaxis=dict(autorange="reversed", dtick=1, tick0=1, range=[top_n + 0.5, 0.5]),
+        legend_title="Drug",
+        height=max(450, 90 * top_n),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    if n_years <= 1:
+        st.caption(
+            "Only one year of data is currently loaded — add more quarters with "
+            "clean_faers.py to see how rankings shift across years."
+        )
+
+
 def main():
     st.title("FAERS Adverse Event Explorer")
     st.caption(
@@ -127,12 +221,27 @@ def main():
 
     drug_input = st.text_input(
         "Drug name",
-        value="ASPIRIN",
-        help="Try a drug from your loaded quarter(s), e.g. MOUNJARO, PREDNISONE, ASPIRIN",
+        value="",
+        placeholder="e.g. ASPIRIN, MOUNJARO, PREDNISONE, METHOTREXATE...",
+        help="Enter a drug name as it might appear on a prescription. "
+             "Try MOUNJARO, PREDNISONE, METHOTREXATE, ASPIRIN, or ACTEMRA "
+             "if you're not sure what to search.",
     )
 
     if not drug_input:
-        st.info("Enter a drug name to begin.")
+        st.info(
+            "Enter a drug name above to explore its reported adverse events. "
+            "Not sure what to try? A few examples from the loaded data: "
+            "**MOUNJARO**, **PREDNISONE**, **METHOTREXATE**, **ASPIRIN**, **ACTEMRA**."
+        )
+        st.divider()
+        st.subheader("Top 5 Most Mentioned Drugs by Year")
+        st.caption(
+            "An overview of which drugs generated the most adverse event reports "
+            "each year, across the quarters you've loaded — a starting point before "
+            "you search for a specific drug above."
+        )
+        render_top_drugs_by_year_chart(top_n=5)
         return
 
     drug_clean = normalize_drug_name(drug_input)
