@@ -145,7 +145,32 @@ def get_top_reactions(drug_clean: str, limit: int = 15) -> pd.DataFrame:
     return df
 
 
-# FAERS outcome codes -> human-readable labels
+@st.cache_data(show_spinner=False)
+def get_co_occurring_drugs(drug_clean: str, limit: int = 10) -> pd.DataFrame:
+    """
+    Which OTHER drugs most often appear on the same reports as this one.
+    Since one FAERS report can list multiple drugs, this self-joins the
+    drug table against itself on primaryid to find co-mentions.
+    """
+    conn = get_connection()
+    query = """
+        SELECT d2.drugname_clean as other_drug, COUNT(DISTINCT d1.primaryid) as co_reports
+        FROM drug d1
+        JOIN drug d2
+            ON d1.primaryid = d2.primaryid
+            AND d2.drugname_clean != d1.drugname_clean
+        WHERE d1.drugname_clean = ?
+          AND d2.drugname_clean != ''
+        GROUP BY d2.drugname_clean
+        ORDER BY co_reports DESC
+        LIMIT ?
+    """
+    df = pd.read_sql(query, conn, params=(drug_clean, limit))
+    conn.close()
+    return df
+
+
+
 OUTCOME_LABELS = {
     "DE": "Death",
     "LT": "Life-Threatening",
@@ -324,7 +349,73 @@ def render_top_drugs_by_year_chart(top_n: int = 5):
 
 
 
+def render_footer():
+    """Shown at the bottom of every page in the app."""
+    st.divider()
+    st.caption(
+        "⚠️ FAERS is a **self-reported** surveillance system — anyone (patients, "
+        "doctors, drug manufacturers, lawyers) can submit a report, and the FDA "
+        "does not verify that the drug actually caused what was reported. A "
+        "reaction or outcome appearing here alongside a drug reflects what someone "
+        "*reported*, not a confirmed medical finding. These figures should be read "
+        "as a starting point for questions, not as medical guidance."
+    )
+
+
+@st.cache_data(show_spinner=False)
+def get_data_coverage() -> dict:
+    """
+    Basic stats about what's actually loaded into faers_clean.db, so
+    anyone viewing the dashboard can see the scope of the data at a
+    glance instead of guessing.
+    """
+    conn = get_connection()
+
+    total_reports = pd.read_sql("SELECT COUNT(DISTINCT primaryid) as n FROM demo", conn)
+    total_drugs = pd.read_sql(
+        "SELECT COUNT(DISTINCT drugname_clean) as n FROM drug WHERE drugname_clean != ''",
+        conn,
+    )
+
+    quarters = []
+    try:
+        cols = pd.read_sql("PRAGMA table_info(demo)", conn)
+        if "source_quarter" in cols["name"].values:
+            q_df = pd.read_sql(
+                "SELECT DISTINCT source_quarter FROM demo ORDER BY source_quarter", conn
+            )
+            quarters = q_df["source_quarter"].tolist()
+    except Exception:
+        quarters = []
+
+    conn.close()
+
+    return {
+        "total_reports": int(total_reports["n"].iloc[0]),
+        "total_drugs": int(total_drugs["n"].iloc[0]),
+        "quarters": quarters,
+    }
+
+
+def render_data_coverage_sidebar():
+    coverage = get_data_coverage()
+    with st.sidebar:
+        st.subheader("📊 Data currently loaded")
+        st.metric("Total unique reports", f"{coverage['total_reports']:,}")
+        st.metric("Unique drugs", f"{coverage['total_drugs']:,}")
+        if coverage["quarters"]:
+            st.write(f"**Quarters loaded ({len(coverage['quarters'])}):**")
+            st.write(", ".join(coverage["quarters"]))
+        else:
+            st.caption(
+                "Quarter labels not available for this database — rebuild with "
+                "clean_faers.py to see them here."
+            )
+
+
 def main():
+    render_data_coverage_sidebar()
+
     st.title("FAERS Adverse Event Explorer")
     st.caption(
         "Built on your own locally cleaned FAERS data (faers_clean.db). "
@@ -343,7 +434,7 @@ def main():
 
     if not drug_input:
         st.info(
-            "Enter a drug name above to explore its reported adverse events. "
+            "👆 Enter a drug name above to explore its reported adverse events. "
             "Not sure what to try? A few examples from the loaded data: "
             "**MOUNJARO**, **PREDNISONE**, **METHOTREXATE**, **ASPIRIN**, **ACTEMRA**."
         )
@@ -355,6 +446,7 @@ def main():
             "you search for a specific drug above."
         )
         render_top_drugs_by_year_chart(top_n=5)
+        render_footer()
         return
 
     drug_clean = normalize_drug_name(drug_input)
@@ -369,6 +461,7 @@ def main():
         )
         with st.expander("See some drug names that ARE in your database"):
             st.write(get_available_drugs(limit=50))
+        render_footer()
         return
 
     st.metric("Total reports (in your loaded data)", f"{total:,}")
@@ -376,9 +469,15 @@ def main():
     yearly_df = get_reports_by_year(drug_clean)
     reactions_df = get_top_reactions(drug_clean)
     outcome_df = get_outcome_breakdown(drug_clean)
+    co_drugs_df = get_co_occurring_drugs(drug_clean)
 
-    tab1, tab2, tab3 = st.tabs(
-        ["Reports over time", "Top reported reactions", "Outcome severity"]
+    tab1, tab2, tab3, tab4 = st.tabs(
+        [
+            "Reports over time",
+            "Top reported reactions",
+            "Outcome severity",
+            "Commonly reported with",
+        ]
     )
 
     with tab1:
@@ -461,16 +560,14 @@ def main():
 
         col1, col2 = st.columns(2)
         with col1:
-            st.metric(f"{drug_clean}: reports with a serious outcome", 
-                      f"{drug_rate:.1f}%",
-                      delta=f"{delta:+.1f} pts vs. overall",
-                      delta_color="off"
+            st.metric(
+                f"{drug_clean}: reports with a serious outcome",
+                f"{drug_rate:.1f}%",
+                delta=f"{delta:+.1f} pts vs. overall average",
+                delta_color="off",
             )
         with col2:
-            st.metric(
-                "Overall average across all loaded drugs",
-                f"{overall_rate:.1f}%"
-            )
+            st.metric("Overall average across all loaded drugs", f"{overall_rate:.1f}%")
         st.caption(
             "'Serious' means the report included at least one FAERS outcome code "
             "(death, hospitalization, life-threatening, disability, etc.). This "
@@ -507,6 +604,36 @@ def main():
                 "add up to your total report count above. Most FAERS reports have "
                 "no serious outcome coded at all."
             )
+
+    with tab4:
+        if co_drugs_df.empty:
+            st.write(
+                f"No other drugs found co-mentioned with {drug_clean} in your "
+                "loaded data — most of its reports may list it as the only drug."
+            )
+        else:
+            fig4 = go.Figure(
+                go.Bar(
+                    x=co_drugs_df["co_reports"],
+                    y=co_drugs_df["other_drug"],
+                    orientation="h",
+                )
+            )
+            fig4.update_layout(
+                title=f"Drugs most often reported alongside {drug_clean}",
+                xaxis_title="Number of shared reports",
+                yaxis={"categoryorder": "total ascending"},
+            )
+            st.plotly_chart(fig4, use_container_width=True)
+            st.caption(
+                "Counts how often each drug appears on the SAME report as "
+                f"{drug_clean}. This can reflect common co-prescribing (e.g. a "
+                "drug given alongside another to offset a known side effect), "
+                "unrelated medications the patient happened to also be taking, "
+                "or a mix of both — the data alone can't distinguish which."
+            )
+
+    render_footer()
 
 
 if __name__ == "__main__":
