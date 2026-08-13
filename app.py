@@ -185,6 +185,51 @@ def get_outcome_breakdown(drug_clean: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def get_drug_serious_rate(drug_clean: str) -> float:
+    """
+    % of this drug's reports that include at least one serious outcome
+    code (death, hospitalization, life-threatening, etc.) in OUTC.
+    """
+    conn = get_connection()
+    total = get_total_reports(drug_clean)
+    if total == 0:
+        conn.close()
+        return 0.0
+
+    df = pd.read_sql(
+        """
+        SELECT COUNT(DISTINCT drug.primaryid) as serious
+        FROM drug
+        JOIN outc ON drug.primaryid = outc.primaryid
+        WHERE drug.drugname_clean = ?
+        """,
+        conn,
+        params=(drug_clean,),
+    )
+    conn.close()
+    serious = int(df["serious"].iloc[0])
+    return (serious / total) * 100
+
+
+@st.cache_data(show_spinner=False)
+def get_overall_serious_rate() -> float:
+    """
+    % of ALL reports in the loaded data (any drug) that include at least
+    one serious outcome — the baseline to compare a single drug against.
+    """
+    conn = get_connection()
+    total_df = pd.read_sql("SELECT COUNT(DISTINCT primaryid) as n FROM demo", conn)
+    serious_df = pd.read_sql("SELECT COUNT(DISTINCT primaryid) as n FROM outc", conn)
+    conn.close()
+
+    total = int(total_df["n"].iloc[0])
+    if total == 0:
+        return 0.0
+    serious = int(serious_df["n"].iloc[0])
+    return (serious / total) * 100
+
+
+@st.cache_data(show_spinner=False)
 def get_top_drugs_by_year(top_n: int = 5) -> pd.DataFrame:
     """
     For each year present in the data, find the N drugs with the most
@@ -298,7 +343,7 @@ def main():
 
     if not drug_input:
         st.info(
-            "👆 Enter a drug name above to explore its reported adverse events. "
+            "Enter a drug name above to explore its reported adverse events. "
             "Not sure what to try? A few examples from the loaded data: "
             "**MOUNJARO**, **PREDNISONE**, **METHOTREXATE**, **ASPIRIN**, **ACTEMRA**."
         )
@@ -410,6 +455,32 @@ def main():
             st.plotly_chart(fig2, use_container_width=True)
 
     with tab3:
+        drug_rate = get_drug_serious_rate(drug_clean)
+        overall_rate = get_overall_serious_rate()
+        delta = drug_rate - overall_rate
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(f"{drug_clean}: reports with a serious outcome", 
+                      f"{drug_rate:.1f}%",
+                      delta=f"{delta:+.1f} pts vs. overall",
+                      delta_color="off"
+            )
+        with col2:
+            st.metric(
+                "Overall average across all loaded drugs",
+                f"{overall_rate:.1f}%"
+            )
+        st.caption(
+            "'Serious' means the report included at least one FAERS outcome code "
+            "(death, hospitalization, life-threatening, disability, etc.). This "
+            "compares this drug's reports against the average across every drug "
+            "in your loaded data — both numbers come from the same self-reporting "
+            "system, so it's a fair like-for-like comparison, not a claim about "
+            "real-world risk."
+        )
+        st.divider()
+
         if outcome_df.empty:
             st.write(
                 "No outcome data found for this drug — either no serious outcomes "
