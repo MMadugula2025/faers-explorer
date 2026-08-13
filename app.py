@@ -15,9 +15,17 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 
 DB_PATH = Path("./faers_clean.db")
+
+# Direct-download URL for the full database, hosted as a GitHub Release
+# asset (git commits are capped at 100MB, but Release assets allow up to
+# 2GB — this lets the deployed app use the full multi-quarter dataset
+# without it living in the git repo itself).
+# UPDATE THIS to your actual release asset URL once you've uploaded it.
+DB_DOWNLOAD_URL = "https://github.com/MMadugula2025/faers-explorer/releases/download/v1-data/faers_clean.db"
 
 st.set_page_config(page_title="FAERS Adverse Event Explorer", layout="wide")
 
@@ -44,7 +52,40 @@ def normalize_drug_name(raw_name: str) -> str:
     return name
 
 
+def ensure_database_downloaded():
+    """
+    If faers_clean.db isn't present locally (as will be true on a fresh
+    Streamlit Cloud deploy, since it's too large to live in the git repo),
+    download it from the GitHub Release asset instead. Runs once per cold
+    start — the file persists on disk for the life of that container.
+    """
+    if DB_PATH.exists():
+        return
+
+    if DB_DOWNLOAD_URL == "PASTE_YOUR_RELEASE_URL_HERE":
+        st.error(
+            "Database download URL isn't configured yet. Set DB_DOWNLOAD_URL "
+            "at the top of app.py to your GitHub Release asset URL."
+        )
+        st.stop()
+
+    with st.spinner(
+        "Downloading FAERS database (about 1.7GB) — this only happens once "
+        "per app restart and may take a few minutes..."
+    ):
+        try:
+            response = requests.get(DB_DOWNLOAD_URL, stream=True, timeout=600)
+            response.raise_for_status()
+            with open(DB_PATH, "wb") as f:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    f.write(chunk)
+        except requests.RequestException as e:
+            st.error(f"Failed to download the database: {e}")
+            st.stop()
+
+
 def get_connection():
+    ensure_database_downloaded()
     if not DB_PATH.exists():
         st.error(
             f"Couldn't find {DB_PATH}. Run clean_faers_simple.py (or clean_faers.py) "
