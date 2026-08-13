@@ -101,6 +101,34 @@ def get_reports_by_year(drug_clean: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def get_total_reports_by_year() -> pd.DataFrame:
+    """
+    Total FAERS report volume per year, across ALL drugs — used to
+    normalize a single drug's yearly counts against overall reporting
+    volume, since FAERS as a whole gets more reports every year
+    regardless of any single drug's safety profile.
+    """
+    conn = get_connection()
+    query = """
+        SELECT
+            substr(fda_dt, 1, 4) as year,
+            COUNT(DISTINCT primaryid) as total_reports
+        FROM demo
+        WHERE fda_dt IS NOT NULL
+        GROUP BY year
+        ORDER BY year
+    """
+    df = pd.read_sql(query, conn)
+    conn.close()
+
+    if df.empty:
+        return df
+
+    df["year"] = df["year"].astype(int)
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def get_top_reactions(drug_clean: str, limit: int = 15) -> pd.DataFrame:
     conn = get_connection()
     query = """
@@ -315,17 +343,53 @@ def main():
                 "a trend to show yet. Add more quarters with clean_faers.py to see "
                 "a real trend line here."
             )
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(x=yearly_df["year"], y=yearly_df["reports"], name=drug_clean)
+
+        normalize = st.checkbox(
+            "Show as % of total FAERS reports that year (normalized)",
+            value=False,
+            help="FAERS' overall reporting volume grows every year regardless of "
+                 "any single drug's safety profile. Normalizing shows this drug's "
+                 "share of total reports each year, which controls for that growth.",
         )
-        fig.update_layout(
-            title=f"Reports by year — {drug_clean}",
-            xaxis_title="Year",
-            yaxis_title="Number of reports",
-            xaxis=dict(type="category"),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+
+        if normalize:
+            totals_df = get_total_reports_by_year()
+            merged = yearly_df.merge(totals_df, on="year", how="left")
+            merged["pct"] = (merged["reports"] / merged["total_reports"]) * 100
+
+            fig = go.Figure()
+            fig.add_trace(
+                go.Bar(x=merged["year"], y=merged["pct"], name=drug_clean)
+            )
+            fig.update_layout(
+                title=f"Reports by year, as % of all FAERS reports — {drug_clean}",
+                xaxis_title="Year",
+                yaxis_title="% of total FAERS reports that year",
+                xaxis=dict(type="category"),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "Each bar = (this drug's reports that year) ÷ (all drugs' reports "
+                "that year). This controls for FAERS' overall growth in reporting "
+                "volume, which the raw count view doesn't."
+            )
+        else:
+            fig = go.Figure()
+            fig.add_trace(
+                go.Bar(x=yearly_df["year"], y=yearly_df["reports"], name=drug_clean)
+            )
+            fig.update_layout(
+                title=f"Reports by year — {drug_clean}",
+                xaxis_title="Year",
+                yaxis_title="Number of reports",
+                xaxis=dict(type="category"),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "Raw counts aren't adjusted for FAERS' overall reporting volume, "
+                "which grows every year. Check the box above to see this drug's "
+                "share of total reports instead."
+            )
 
     with tab2:
         if reactions_df.empty:
