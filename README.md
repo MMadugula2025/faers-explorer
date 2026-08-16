@@ -8,6 +8,8 @@ raw files are notoriously messy (inconsistent drug name formatting,
 duplicate/revised case reports across releases), so a real ETL pipeline
 sits underneath the dashboard, not a pre-cleaned dataset.
 
+Check out the current version here: https://faers-explorer.streamlit.app/
+
 > **Note on the data:** FAERS is a voluntary, self-reported surveillance
 > system. Anyone — patients, doctors, drug manufacturers, lawyers — can
 > submit a report, and the FDA does not verify that the drug actually
