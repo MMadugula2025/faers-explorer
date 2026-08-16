@@ -173,4 +173,3 @@ Below are screenshots of the main features in the data visualization:
 ![This image shows the side panel which is present as you move throughout the website. It includes statistics such as total unique reports, unique drugs, and all the quarters loaded into the database.](Screenshots/Side_Panel.png)
 
 
-
