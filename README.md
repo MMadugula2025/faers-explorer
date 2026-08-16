@@ -166,7 +166,7 @@ every column in every file — worth a skim when a field isn't obvious.
 Below are screenshots of the main features in the data visualization:
 ![This image shows the top 5 most mentioned drugs by year.](Screenshots/Top_5.png)
 ![This image displays the raw total number of reports by year for a specific drug (in this case, it is Mounjaro).](Screenshots/Total_Reports_Raw.png)
-![This image displays the percent of total reports that year for a specific drug (in this case, it is Mounjaro).](Screenshots/Total_Reports_Percentage.png.png)
+![This image displays the percent of total reports that year for a specific drug (in this case, it is Mounjaro).](Screenshots/Total_Reports_Percentage.png)
 ![This image pictures the top 15 reported reactions for a specific drug (in this case, it is Mounjaro).](Screenshots/Top_Reactions.png)
 ![This image depicts a donut chart indicating the reported outcome types for a specific drug (in this case, it is Mounjaro). Additionally, it also compares the specific drug's reports with a serious outcome with the overall reports with a serious outcome across all drugs in the dataset (in this case, it is Mounjaro).](Screenshots/Outcome_Severity.png)
 ![This image pictures some of the various drugs that are most often reported alongside a specific drug (in this case, it shows drugs that are reported alongside Mounjaro).](Screenshots/Commonly_Reported_With.png)
